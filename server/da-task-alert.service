@@ -1,0 +1,22 @@
+[Unit]
+Description=DA Task Alert - DataAnnotation Project Monitor
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/opt/da-task-alert/local
+EnvironmentFile=/opt/da-task-alert/.env
+ExecStart=/usr/bin/python3 /opt/da-task-alert/local/monitor.py
+Restart=always
+RestartSec=30
+
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/opt/da-task-alert/local
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

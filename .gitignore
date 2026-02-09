@@ -1,0 +1,21 @@
+# Environment and secrets
+.env
+*.env
+!config.example.env
+
+# Python
+__pycache__/
+*.py[cod]
+venv/
+.venv/
+
+# Runtime data
+seen_projects.json
+
+# OS
+Thumbs.db
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
