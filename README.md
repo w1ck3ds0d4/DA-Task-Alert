@@ -106,4 +106,4 @@ DA-Task-Alert/
 
 ## License
 
-MIT
+Proprietary - All rights reserved.
