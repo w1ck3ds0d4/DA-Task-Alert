@@ -337,6 +337,7 @@
           display: flex;
           align-items: center;
           justify-content: space-between;
+          gap: 16px;
           margin-bottom: 8px;
           font-weight: 600;
         }
@@ -443,10 +444,17 @@
           background: #2d2d44; color: #e0e0e0; border: 1px solid #444;
           border-radius: 6px; box-sizing: border-box;
         }
-        #da-settings-modal .modal-buttons { margin-top: 16px; text-align: right; }
+        #da-settings-modal .modal-buttons {
+          margin-top: 16px;
+          display: flex;
+          gap: 8px;
+          justify-content: flex-end;
+          flex-wrap: nowrap;
+        }
         #da-settings-modal .modal-buttons button {
           background: #2d2d44; color: #e0e0e0; border: 1px solid #444;
-          border-radius: 6px; padding: 8px 16px; cursor: pointer; margin-left: 8px;
+          border-radius: 6px; padding: 8px 12px; cursor: pointer;
+          white-space: nowrap;
         }
         #da-settings-modal .modal-buttons button.primary {
           background: #4a90d9; border-color: #4a90d9;
