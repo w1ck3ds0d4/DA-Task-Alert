@@ -100,11 +100,10 @@ def fetch_projects_page(session):
 
 # ─── HTML Parsing ──────────────────────────────────────────────────────────────
 # DA page structure (as of 2026-04):
-#   <h2>Qualifications</h2>  ... (ignored)
 #   <h2>Projects</h2>
 #   <table>
-#     <thead><tr><th>Name</th></tr></thead>
-#     <tbody><tr><td><a href="...">Project Name</a></td></tr></tbody>
+#     <thead><tr><th>Name</th><th>Pay</th><th>Tasks</th><th>Created</th>...</tr></thead>
+#     <tbody><tr><td><a href="...">Project Name</a></td><td>$28.00/hr</td><td>9</td><td>Apr 4</td>...</tr></tbody>
 #   </table>
 
 def parse_projects(html):
@@ -131,7 +130,7 @@ def parse_projects(html):
             table = el
             break
         if el.name == "h2":
-            break  # hit next section
+            break
         nested = el.find("table")
         if nested:
             table = nested
@@ -142,20 +141,40 @@ def parse_projects(html):
         print("[!] Could not find projects table.", file=sys.stderr)
         return projects
 
-    # Scrape rows - single "Name" column
+    # Determine column indices from header row
+    name_col, pay_col, tasks_col, created_col = 0, -1, -1, -1
+    header_row = table.find("thead")
+    if header_row:
+        for i, th in enumerate(header_row.find_all("th")):
+            text = th.get_text(strip=True).lower()
+            if text == "name": name_col = i
+            elif text == "pay": pay_col = i
+            elif text == "tasks": tasks_col = i
+            elif text == "created": created_col = i
+
+    # Scrape each data row
     for row in table.find_all("tr"):
         if row.find("th"):
-            continue  # skip header
-
-        cell = row.find("td")
-        if not cell:
             continue
 
-        link = cell.find("a")
-        name = (link or cell).get_text(strip=True)
+        cells = row.find_all("td")
+        if not cells:
+            continue
 
-        if name:
-            projects.append({"name": name})
+        name_cell = cells[name_col] if name_col < len(cells) else None
+        if not name_cell:
+            continue
+
+        link = name_cell.find("a")
+        name = (link or name_cell).get_text(strip=True)
+        if not name:
+            continue
+
+        pay = cells[pay_col].get_text(strip=True) if pay_col >= 0 and pay_col < len(cells) else ""
+        tasks = cells[tasks_col].get_text(strip=True) if tasks_col >= 0 and tasks_col < len(cells) else ""
+        created = cells[created_col].get_text(strip=True) if created_col >= 0 and created_col < len(cells) else ""
+
+        projects.append({"name": name, "pay": pay, "tasks": tasks, "created": created})
 
     return projects
 
@@ -217,7 +236,12 @@ def send_desktop_notification(title, body):
 
 
 def alert_new_project(project):
-    body = project["name"]
+    parts = [project["name"]]
+    if project.get("pay"):
+        parts.append(project["pay"])
+    if project.get("tasks"):
+        parts.append(f"{project['tasks']} tasks")
+    body = " - ".join(parts)
     title = "New DA Project!"
 
     print(f"  [NEW] {body}")
@@ -227,8 +251,12 @@ def alert_new_project(project):
 
 # ─── Main Loop ─────────────────────────────────────────────────────────────────
 
+is_first_check = True
+
 def check_once(session, seen_projects):
     """Run a single check. Returns updated seen_projects set."""
+    global is_first_check
+
     html = fetch_projects_page(session)
     if html is None:
         return seen_projects
@@ -240,13 +268,17 @@ def check_once(session, seen_projects):
     new_projects = [p for p in filtered if p["name"] not in seen_projects]
 
     if new_projects:
-        print(f"[+] Found {len(new_projects)} new project(s)!")
+        if is_first_check and not seen_projects:
+            print(f"[+] First run - found {len(new_projects)} paid project(s) on dashboard.")
+        else:
+            print(f"[+] Found {len(new_projects)} new project(s)!")
         for p in new_projects:
             alert_new_project(p)
             seen_projects.add(p["name"])
     else:
         print(f"[*] No new projects. ({len(filtered)} tracked, {excluded_count} filtered out)")
 
+    is_first_check = False
     return seen_projects
 
 

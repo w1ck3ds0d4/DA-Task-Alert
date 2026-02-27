@@ -64,61 +64,87 @@
   }
 
   // ─── Page Fetching ──────────────────────────────────────────────────
-  // Fetches a fresh copy of the projects page via HTTP (same origin = no CORS).
-  // No page reload needed - runs silently in the background.
+  // DA is a single-page app - raw fetch() returns an empty shell without
+  // JS-rendered content. We must either:
+  //   1. Scrape the live document (if we're on the projects page)
+  //   2. Use a hidden iframe (which runs JS and renders the full page)
 
   const DA_PROJECTS_URL = "https://app.dataannotation.tech/workers/projects";
 
-  async function fetchFreshPage() {
-    try {
-      const resp = await fetch(DA_PROJECTS_URL, {
-        credentials: "include",
-        cache: "no-store",
-      });
+  function isOnProjectsPage() {
+    return window.location.pathname.includes("/workers/projects");
+  }
 
-      if (!resp.ok) {
-        console.error(`[DA Alert] Fetch failed: HTTP ${resp.status}`);
-        return null;
-      }
+  function getLiveDocument() {
+    return document;
+  }
 
-      if (resp.redirected && resp.url.toLowerCase().includes("login")) {
-        console.error("[DA Alert] Session expired - redirected to login.");
-        updateStatusUI("Session Expired", "#d9534f");
-        return null;
-      }
+  function getDocViaIframe() {
+    return new Promise((resolve) => {
+      const iframe = document.createElement("iframe");
+      iframe.style.cssText = "position:fixed;top:-9999px;left:-9999px;width:1px;height:1px;opacity:0;pointer-events:none;";
+      iframe.src = DA_PROJECTS_URL;
 
-      const html = await resp.text();
-      const parser = new DOMParser();
-      return parser.parseFromString(html, "text/html");
-    } catch (e) {
-      console.error("[DA Alert] Fetch error:", e);
-      return null;
-    }
+      const timeout = setTimeout(() => {
+        console.warn("[DA Alert] Iframe timed out.");
+        iframe.remove();
+        resolve(null);
+      }, 30000);
+
+      iframe.onload = () => {
+        // Wait for SPA to render content inside the iframe
+        let attempts = 0;
+        const waitForContent = setInterval(() => {
+          attempts++;
+          try {
+            const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
+            const hasProjects = iframeDoc.querySelector("h2");
+            if (hasProjects || attempts >= 20) {
+              clearInterval(waitForContent);
+              clearTimeout(timeout);
+              resolve(iframeDoc);
+              // Clean up iframe after a short delay so DOM stays accessible
+              setTimeout(() => iframe.remove(), 500);
+            }
+          } catch (e) {
+            // Cross-origin error
+            clearInterval(waitForContent);
+            clearTimeout(timeout);
+            console.error("[DA Alert] Iframe cross-origin blocked:", e);
+            iframe.remove();
+            resolve(null);
+          }
+        }, 500);
+      };
+
+      iframe.onerror = () => {
+        clearTimeout(timeout);
+        iframe.remove();
+        resolve(null);
+      };
+
+      document.body.appendChild(iframe);
+    });
   }
 
   // ─── DOM Scraping ───────────────────────────────────────────────────
-  // DA page structure (as of 2026-04):
-  //   <h2>Qualifications</h2>  ... (ignored)
-  //   <h2>Projects</h2>
-  //   <table>
-  //     <thead><tr><th>Name</th></tr></thead>
-  //     <tbody>
-  //       <tr><td><a href="...">Project Name</a></td></tr>
-  //       ...
-  //     </tbody>
-  //   </table>
-  //   <h2>Report Time</h2> ... (ignored)
+  // DA uses Tailwind CSS with divs, not semantic HTML tables.
+  // Actual structure (as of 2026-04):
+  //   <h3 class="tw-text-h3 ...">Projects</h3>
+  //   ...
+  //   <div class="active-table">
+  //     (header row with Name, Pay, Tasks, Created columns)
+  //     (data rows with project links)
+  //   </div>
 
   function scrapeProjects(doc) {
     const projects = [];
 
-    // Find the "Projects" heading, then grab the table that follows it
-    const headings = doc.querySelectorAll("h2");
+    // Strategy 1: Find the "Projects" heading (could be h2, h3, or any heading)
     let projectsHeading = null;
-
-    for (const h of headings) {
-      if (h.textContent.trim().toLowerCase() === "projects") {
-        projectsHeading = h;
+    for (const el of doc.querySelectorAll("h1, h2, h3, h4, h5, h6")) {
+      if (el.textContent.trim().toLowerCase() === "projects") {
+        projectsHeading = el;
         break;
       }
     }
@@ -128,48 +154,96 @@
       return projects;
     }
 
-    // Walk siblings after the heading to find the table
-    let el = projectsHeading.nextElementSibling;
-    let table = null;
-    while (el) {
-      if (el.tagName === "TABLE") {
-        table = el;
-        break;
-      }
-      // Stop if we hit the next section heading
-      if (el.tagName === "H2") break;
-      // The table might be nested inside a wrapper div
-      const nested = el.querySelector("table");
-      if (nested) {
-        table = nested;
-        break;
-      }
-      el = el.nextElementSibling;
+    console.log("[DA Alert] Found Projects heading:", projectsHeading.tagName);
+
+    // Strategy 2: Find the active-table div or any table-like container after the heading
+    // Walk up to find the parent section, then look for the table within it
+    let container = null;
+
+    // Look for .active-table in the same section
+    let parent = projectsHeading.closest("div");
+    while (parent && !container) {
+      container = parent.querySelector(".active-table, table");
+      if (!container) parent = parent.parentElement;
     }
 
-    if (!table) {
-      console.warn("[DA Alert] Could not find projects table.");
+    // Fallback: search the whole document
+    if (!container) {
+      container = doc.querySelector(".active-table, table");
+    }
+
+    if (!container) {
+      console.warn("[DA Alert] Could not find projects table/container.");
       return projects;
     }
 
-    // Scrape each row - the table has a single "Name" column
-    const rows = table.querySelectorAll("tbody tr, tr");
-    for (const row of rows) {
-      // Skip header row
-      if (row.querySelector("th")) continue;
+    console.log("[DA Alert] Found container:", container.className.substring(0, 50));
 
-      const cell = row.querySelector("td");
-      if (!cell) continue;
+    // Strategy 3: If it's an actual <table>, parse traditionally
+    if (container.tagName === "TABLE") {
+      const rows = container.querySelectorAll("tbody tr, tr");
+      for (const row of rows) {
+        if (row.querySelector("th")) continue;
+        const cells = row.querySelectorAll("td");
+        if (cells.length === 0) continue;
+        const link = cells[0].querySelector("a");
+        const name = (link || cells[0]).textContent.trim();
+        if (!name) continue;
+        const pay = cells[1] ? cells[1].textContent.trim() : "";
+        const tasks = cells[2] ? cells[2].textContent.trim() : "";
+        const created = cells[3] ? cells[3].textContent.trim() : "";
+        projects.push({ name, pay, tasks, created, id: name });
+      }
+      return projects;
+    }
 
-      const link = cell.querySelector("a");
-      const name = (link || cell).textContent.trim();
-      const href = link ? link.getAttribute("href") : "";
+    // Strategy 4: Div-based table (Tailwind) - find all links to projects
+    // Each project row contains a link with the project name
+    const links = container.querySelectorAll("a[href]");
+    for (const link of links) {
+      const name = link.textContent.trim();
+      const href = link.getAttribute("href") || "";
 
-      if (name) {
-        projects.push({ name, href, id: name });
+      // Skip non-project links (e.g., navigation, buttons)
+      if (!name || name.length < 5) continue;
+      if (!href.includes("project") && !href.includes("task") && !href.includes("/workers/")) continue;
+
+      // Try to find pay/tasks/created in the same row (parent container)
+      const row = link.closest("tr, [class*='tw-']")?.parentElement?.closest("div, tr") || link.parentElement;
+      const rowText = row ? row.textContent : "";
+
+      const payMatch = rowText.match(/\$[\d.]+\/hr/);
+      const pay = payMatch ? payMatch[0] : "";
+
+      // Extract just the task count number near the project
+      const tasks = "";
+      const created = "";
+
+      projects.push({ name, pay, tasks, created, id: name });
+    }
+
+    // Strategy 5: If no links found, try getting all text rows from the container
+    if (projects.length === 0) {
+      console.log("[DA Alert] No links found in container, trying text rows...");
+      // Get all direct child divs that look like rows (have multiple child divs)
+      const rows = container.querySelectorAll("div > div");
+      for (const row of rows) {
+        const text = row.textContent.trim();
+        // Skip header-like rows and very short text
+        if (text.toLowerCase().startsWith("name") || text.length < 5) continue;
+        if (text.includes("Hide") && text.includes("Created")) continue; // header row
+
+        // First meaningful text chunk is likely the project name
+        const firstChild = row.querySelector("a, span, div");
+        const name = firstChild ? firstChild.textContent.trim() : text.substring(0, 100);
+        if (name && name.length > 5) {
+          const payMatch = text.match(/\$[\d.]+\/hr/);
+          projects.push({ name, pay: payMatch ? payMatch[0] : "", tasks: "", created: "", id: name });
+        }
       }
     }
 
+    console.log("[DA Alert] Scraped projects:", projects.map(p => p.name));
     return projects;
   }
 
@@ -250,7 +324,10 @@
   function alertNewProjects(newProjects) {
     newProjects.forEach((p) => {
       const title = "New DA Project!";
-      const body = p.name;
+      const parts = [p.name];
+      if (p.pay) parts.push(p.pay);
+      if (p.tasks) parts.push(`${p.tasks} tasks`);
+      const body = parts.join(" - ");
 
       sendNtfyAlert(title, body);
       sendDesktopNotification(title, body);
@@ -266,15 +343,26 @@
 
   // ─── Main Check Logic ──────────────────────────────────────────────
   let isChecking = false;
+  let isFirstCheck = seenProjects.size === 0;
 
-  async function checkForNewProjects() {
+  async function checkForNewProjects(useLiveDOM = false) {
     if (!getSetting("enabled") || isChecking) return;
     isChecking = true;
 
     console.log("[DA Alert] Checking for new projects...");
     updateStatusUI("Checking...", "#f0ad4e");
 
-    const freshDoc = await fetchFreshPage();
+    // useLiveDOM: scrape the current page (for initial load / manual check on projects page)
+    // Otherwise: use a hidden iframe to get a fresh SPA render (for polling / off-page checks)
+    let freshDoc;
+    if (useLiveDOM && isOnProjectsPage()) {
+      console.log("[DA Alert] Using live DOM...");
+      freshDoc = getLiveDocument();
+    } else {
+      console.log("[DA Alert] Loading via iframe...");
+      freshDoc = await getDocViaIframe();
+    }
+
     if (!freshDoc) {
       updateStatusUI("Fetch Failed", "#d9534f");
       isChecking = false;
@@ -282,13 +370,22 @@
     }
 
     const allProjects = scrapeProjects(freshDoc);
+    console.log(`[DA Alert] Scraped ${allProjects.length} total project(s):`, allProjects.map(p => p.name));
     const filtered = filterProjects(allProjects);
+    console.log(`[DA Alert] After filtering: ${filtered.length} paid, ${allProjects.length - filtered.length} excluded`);
+    console.log(`[DA Alert] Currently seen: ${seenProjects.size} project(s)`);
 
     const newProjects = filtered.filter((p) => !seenProjects.has(p.id));
 
     if (newProjects.length > 0) {
-      console.log(`[DA Alert] Found ${newProjects.length} new project(s)!`);
+      // On first run, alert for all existing paid projects too
+      if (isFirstCheck) {
+        console.log(`[DA Alert] First run - found ${newProjects.length} paid project(s) on dashboard.`);
+      } else {
+        console.log(`[DA Alert] Found ${newProjects.length} new project(s)!`);
+      }
       alertNewProjects(newProjects);
+      isFirstCheck = false;
 
       newProjects.forEach((p) => seenProjects.add(p.id));
       pruneSeenProjects();
@@ -296,6 +393,7 @@
       newThisSession += newProjects.length;
     } else {
       console.log(`[DA Alert] No new projects. (${filtered.length} tracked, ${allProjects.length - filtered.length} filtered out)`);
+      isFirstCheck = false;
     }
 
     lastCheckTime = new Date().toLocaleTimeString();
@@ -377,7 +475,7 @@
         <div style="margin-top:8px">
           <button id="da-btn-settings" title="Settings">Settings</button>
           <button id="da-btn-check" title="Check now">Check Now</button>
-          <button id="da-btn-reset" title="Reset seen projects">Reset Seen</button>
+          <button id="da-btn-clear" title="Clear cache and re-alert all current projects">Clear Cache</button>
         </div>
       </div>
     `;
@@ -391,13 +489,15 @@
     });
 
     document.getElementById("da-btn-settings").addEventListener("click", openSettings);
-    document.getElementById("da-btn-check").addEventListener("click", () => checkForNewProjects());
-    document.getElementById("da-btn-reset").addEventListener("click", () => {
+    document.getElementById("da-btn-check").addEventListener("click", () => checkForNewProjects(true));
+    document.getElementById("da-btn-clear").addEventListener("click", () => {
       seenProjects.clear();
       GM_setValue("seenProjects", "[]");
+      isFirstCheck = true;
       newThisSession = 0;
       updateStatusDetails(0, 0);
-      console.log("[DA Alert] Reset seen projects.");
+      console.log("[DA Alert] Cache cleared. Re-checking...");
+      checkForNewProjects(true);
     });
   }
 
@@ -583,11 +683,11 @@
     console.log("[DA Alert] Initializing...");
     createStatusUI();
 
-    // Initial check after short delay (let page fully render)
+    // Initial check after delay (let SPA fully render)
     setTimeout(() => {
-      checkForNewProjects();
+      checkForNewProjects(true); // use live DOM for initial check
       startPolling();
-    }, 3000);
+    }, 5000);
   }
 
   if (document.readyState === "complete") {
