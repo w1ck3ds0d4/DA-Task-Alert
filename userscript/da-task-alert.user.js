@@ -64,67 +64,12 @@
   }
 
   // ─── Page Fetching ──────────────────────────────────────────────────
-  // DA is a single-page app - raw fetch() returns an empty shell without
-  // JS-rendered content. We must either:
-  //   1. Scrape the live document (if we're on the projects page)
-  //   2. Use a hidden iframe (which runs JS and renders the full page)
-
-  const DA_PROJECTS_URL = "https://app.dataannotation.tech/workers/projects";
+  // DA is a SPA and blocks cross-origin iframe access, so we:
+  //   - On the projects page: scrape live DOM, then reload for fresh data on polls
+  //   - On other pages: navigate to projects page first
 
   function isOnProjectsPage() {
     return window.location.pathname.includes("/workers/projects");
-  }
-
-  function getLiveDocument() {
-    return document;
-  }
-
-  function getDocViaIframe() {
-    return new Promise((resolve) => {
-      const iframe = document.createElement("iframe");
-      iframe.style.cssText = "position:fixed;top:-9999px;left:-9999px;width:1px;height:1px;opacity:0;pointer-events:none;";
-      iframe.src = DA_PROJECTS_URL;
-
-      const timeout = setTimeout(() => {
-        console.warn("[DA Alert] Iframe timed out.");
-        iframe.remove();
-        resolve(null);
-      }, 30000);
-
-      iframe.onload = () => {
-        // Wait for SPA to render content inside the iframe
-        let attempts = 0;
-        const waitForContent = setInterval(() => {
-          attempts++;
-          try {
-            const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
-            const hasProjects = iframeDoc.querySelector("h2");
-            if (hasProjects || attempts >= 20) {
-              clearInterval(waitForContent);
-              clearTimeout(timeout);
-              resolve(iframeDoc);
-              // Clean up iframe after a short delay so DOM stays accessible
-              setTimeout(() => iframe.remove(), 500);
-            }
-          } catch (e) {
-            // Cross-origin error
-            clearInterval(waitForContent);
-            clearTimeout(timeout);
-            console.error("[DA Alert] Iframe cross-origin blocked:", e);
-            iframe.remove();
-            resolve(null);
-          }
-        }, 500);
-      };
-
-      iframe.onerror = () => {
-        clearTimeout(timeout);
-        iframe.remove();
-        resolve(null);
-      };
-
-      document.body.appendChild(iframe);
-    });
   }
 
   // ─── DOM Scraping ───────────────────────────────────────────────────
@@ -345,29 +290,20 @@
   let isChecking = false;
   let isFirstCheck = seenProjects.size === 0;
 
-  async function checkForNewProjects(useLiveDOM = false) {
+  function checkForNewProjects() {
     if (!getSetting("enabled") || isChecking) return;
-    isChecking = true;
 
+    if (!isOnProjectsPage()) {
+      console.log("[DA Alert] Not on projects page, skipping check.");
+      updateStatusUI("Navigate to Projects", "#f0ad4e");
+      return;
+    }
+
+    isChecking = true;
     console.log("[DA Alert] Checking for new projects...");
     updateStatusUI("Checking...", "#f0ad4e");
 
-    // useLiveDOM: scrape the current page (for initial load / manual check on projects page)
-    // Otherwise: use a hidden iframe to get a fresh SPA render (for polling / off-page checks)
-    let freshDoc;
-    if (useLiveDOM && isOnProjectsPage()) {
-      console.log("[DA Alert] Using live DOM...");
-      freshDoc = getLiveDocument();
-    } else {
-      console.log("[DA Alert] Loading via iframe...");
-      freshDoc = await getDocViaIframe();
-    }
-
-    if (!freshDoc) {
-      updateStatusUI("Fetch Failed", "#d9534f");
-      isChecking = false;
-      return;
-    }
+    const freshDoc = document;
 
     const allProjects = scrapeProjects(freshDoc);
     console.log(`[DA Alert] Scraped ${allProjects.length} total project(s):`, allProjects.map(p => p.name));
@@ -489,7 +425,7 @@
     });
 
     document.getElementById("da-btn-settings").addEventListener("click", openSettings);
-    document.getElementById("da-btn-check").addEventListener("click", () => checkForNewProjects(true));
+    document.getElementById("da-btn-check").addEventListener("click", () => checkForNewProjects());
     document.getElementById("da-btn-clear").addEventListener("click", () => {
       seenProjects.clear();
       GM_setValue("seenProjects", "[]");
@@ -497,7 +433,7 @@
       newThisSession = 0;
       updateStatusDetails(0, 0);
       console.log("[DA Alert] Cache cleared. Re-checking...");
-      checkForNewProjects(true);
+      checkForNewProjects();
     });
   }
 
@@ -666,11 +602,28 @@
   }
 
   // ─── Polling ───────────────────────────────────────────────────────
+  // On each poll: reload the page so the SPA fetches fresh data from the server,
+  // then scrape the newly rendered DOM after reload.
+  // The script re-initializes automatically after reload (Tampermonkey re-injects it).
+
   function startPolling() {
     if (pollTimer) clearInterval(pollTimer);
 
     const interval = getSetting("pollInterval") * 1000;
-    pollTimer = setInterval(() => checkForNewProjects(), interval);
+    pollTimer = setInterval(() => {
+      if (!getSetting("enabled")) return;
+
+      if (isOnProjectsPage()) {
+        // Reload the page - Tampermonkey will re-inject the script,
+        // which triggers init() -> checkForNewProjects() on the fresh DOM
+        console.log("[DA Alert] Polling: reloading page for fresh data...");
+        GM_setValue("pendingCheck", "true");
+        window.location.reload();
+      } else {
+        console.log("[DA Alert] Not on projects page, skipping poll.");
+        updateStatusUI("Navigate to Projects", "#f0ad4e");
+      }
+    }, interval);
 
     console.log(`[DA Alert] Polling every ${getSetting("pollInterval")}s`);
   }
@@ -683,9 +636,15 @@
     console.log("[DA Alert] Initializing...");
     createStatusUI();
 
-    // Initial check after delay (let SPA fully render)
+    // Check if this is a reload from polling, or a fresh page load
+    const isPollReload = GM_getValue("pendingCheck", "false") === "true";
+    if (isPollReload) {
+      GM_setValue("pendingCheck", "false");
+    }
+
+    // Wait for SPA to render, then check
     setTimeout(() => {
-      checkForNewProjects(true); // use live DOM for initial check
+      checkForNewProjects();
       startPolling();
     }, 5000);
   }
