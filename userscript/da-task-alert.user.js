@@ -311,10 +311,18 @@
     console.log(`[DA Alert] After filtering: ${filtered.length} paid, ${allProjects.length - filtered.length} excluded`);
     console.log(`[DA Alert] Currently seen: ${seenProjects.size} project(s)`);
 
+    // Remove projects from seen list that are no longer on the dashboard.
+    // This way, if a project disappears and reappears later, it gets pinged again.
+    const currentIds = new Set(allProjects.map((p) => p.id));
+    const removed = [...seenProjects].filter((id) => !currentIds.has(id));
+    if (removed.length > 0) {
+      removed.forEach((id) => seenProjects.delete(id));
+      console.log(`[DA Alert] Removed ${removed.length} project(s) no longer on dashboard:`, removed);
+    }
+
     const newProjects = filtered.filter((p) => !seenProjects.has(p.id));
 
     if (newProjects.length > 0) {
-      // On first run, alert for all existing paid projects too
       if (isFirstCheck) {
         console.log(`[DA Alert] First run - found ${newProjects.length} paid project(s) on dashboard.`);
       } else {
@@ -324,13 +332,15 @@
       isFirstCheck = false;
 
       newProjects.forEach((p) => seenProjects.add(p.id));
-      pruneSeenProjects();
       GM_setValue("seenProjects", JSON.stringify([...seenProjects]));
       newThisSession += newProjects.length;
     } else {
       console.log(`[DA Alert] No new projects. (${filtered.length} tracked, ${allProjects.length - filtered.length} filtered out)`);
       isFirstCheck = false;
     }
+
+    // Save updated seen list (includes removals)
+    GM_setValue("seenProjects", JSON.stringify([...seenProjects]));
 
     lastCheckTime = new Date().toLocaleTimeString();
     GM_setValue("lastCheckTime", lastCheckTime);

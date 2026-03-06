@@ -265,6 +265,13 @@ def check_once(session, seen_projects):
     filtered = filter_projects(all_projects)
     excluded_count = len(all_projects) - len(filtered)
 
+    # Remove projects no longer on the dashboard so they re-alert if they reappear
+    current_names = {p["name"] for p in all_projects}
+    removed = seen_projects - current_names
+    if removed:
+        print(f"[*] Removed {len(removed)} project(s) no longer on dashboard.")
+        seen_projects -= removed
+
     new_projects = [p for p in filtered if p["name"] not in seen_projects]
 
     if new_projects:
