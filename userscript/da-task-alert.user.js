@@ -101,24 +101,32 @@
 
     console.log("[DA Alert] Found Projects heading:", projectsHeading.tagName);
 
-    // Strategy 2: Find the active-table div or any table-like container after the heading
-    // Walk up to find the parent section, then look for the table within it
+    // Strategy 2: Find the active-table div or any table-like container after the heading.
+    // Important: only look within the Projects section, NOT in "Report Time" or other sections.
+    // The page has a "Projects" section (available work) and a "Report Time" section (already done).
+    // We must only scrape from the Projects section.
     let container = null;
 
-    // Look for .active-table in the same section
+    // Walk up from Projects heading looking for a table container
     let parent = projectsHeading.closest("div");
     while (parent && !container) {
-      container = parent.querySelector(".active-table, table");
+      const candidates = parent.querySelectorAll(".active-table, table");
+      for (const c of candidates) {
+        // Reject tables that belong to the "Report Time" section.
+        // These have a "Total Time Reported" column header or nearby "Report Time" text.
+        const headerText = c.textContent.substring(0, 500).toLowerCase();
+        if (headerText.includes("total time reported") || headerText.includes("report time")) {
+          console.log("[DA Alert] Skipping Report Time table");
+          continue;
+        }
+        container = c;
+        break;
+      }
       if (!container) parent = parent.parentElement;
     }
 
-    // Fallback: search the whole document
     if (!container) {
-      container = doc.querySelector(".active-table, table");
-    }
-
-    if (!container) {
-      console.warn("[DA Alert] Could not find projects table/container.");
+      console.log("[DA Alert] No projects table found — likely no available projects.");
       return projects;
     }
 
@@ -131,6 +139,15 @@
         if (row.querySelector("th")) continue;
         const cells = row.querySelectorAll("td");
         if (cells.length === 0) continue;
+
+        // Skip projects that already have time reported (already worked on)
+        const rowText = row.textContent;
+        if (/\d+h\s*\d*m|\d+min/.test(rowText)) {
+          const link = cells[0].querySelector("a");
+          console.log("[DA Alert] Skipping already-worked project:", (link || cells[0]).textContent.trim());
+          continue;
+        }
+
         const link = cells[0].querySelector("a");
         const name = (link || cells[0]).textContent.trim();
         if (!name) continue;
@@ -157,6 +174,12 @@
       const row = link.closest("tr, [class*='tw-']")?.parentElement?.closest("div, tr") || link.parentElement;
       const rowText = row ? row.textContent : "";
 
+      // Skip projects that already have time reported (already worked on)
+      if (/\d+h\s*\d*m|\d+min/.test(rowText)) {
+        console.log("[DA Alert] Skipping already-worked project:", name);
+        continue;
+      }
+
       const payMatch = rowText.match(/\$[\d.]+\/hr/);
       const pay = payMatch ? payMatch[0] : "";
 
@@ -177,6 +200,9 @@
         // Skip header-like rows and very short text
         if (text.toLowerCase().startsWith("name") || text.length < 5) continue;
         if (text.includes("Hide") && text.includes("Created")) continue; // header row
+
+        // Skip projects that already have time reported (already worked on)
+        if (/\d+h\s*\d*m|\d+min/.test(text)) continue;
 
         // First meaningful text chunk is likely the project name
         const firstChild = row.querySelector("a, span, div");
