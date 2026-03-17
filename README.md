@@ -2,9 +2,13 @@
 
 Monitors DataAnnotation for new paid projects and sends push alerts to your phone via [ntfy.sh](https://ntfy.sh). Automatically filters out Refreshers and Reference Versions.
 
+---
+
 ## How It Works
 
 DA Task Alert silently fetches the DataAnnotation projects page in the background on a configurable interval (default: every 5 minutes). When new paid projects appear, it sends a push notification to your phone and/or a desktop notification. Unpaid training content (Refreshers, Reference Versions) is filtered out by default.
+
+---
 
 ## Three Ways to Run
 
@@ -13,6 +17,8 @@ DA Task Alert silently fetches the DataAnnotation projects page in the backgroun
 | **Tampermonkey Userscript** | Easiest setup, most reliable | Yes (runs while any DA page is open) |
 | **Local Python Script** | Background monitoring on your PC | No (uses session cookies) |
 | **Oracle Free Tier Server** | 24/7 monitoring, no PC needed | No (headless server) |
+
+---
 
 ## Quick Start
 
@@ -59,6 +65,8 @@ Run once (for cron): `python monitor.py --once`
 
 See [server/README.md](server/README.md) for the full deployment guide.
 
+---
+
 ## Configuration
 
 **Tampermonkey**: configured via the Settings panel in the floating UI (bottom-right on any DA page).
@@ -74,6 +82,8 @@ See [server/README.md](server/README.md) for the full deployment guide.
 | `DESKTOP_NOTIFY` | `true` | Show desktop notifications |
 | `DA_SESSION_COOKIE` | *(Python only)* | Session cookie from browser DevTools |
 
+---
+
 ## Security
 
 - **ntfy topics are public** - anyone who knows the topic name can subscribe. Use a long random string (e.g., `da-alert-a7f3b9c2e1d4`), not something guessable.
@@ -82,11 +92,15 @@ See [server/README.md](server/README.md) for the full deployment guide.
 - **Seen projects are pruned** - capped at 500 entries to prevent unbounded storage growth.
 - **Poll interval enforced** - minimum 300 seconds (5 minutes) to avoid rate limiting or account flags on DA.
 
+---
+
 ## Important Notes
 
 - **5-minute minimum poll interval** - DA community standard; polling faster may flag your account
 - **Session cookies expire** - the Python script will alert you via ntfy when your session expires
 - **DOM selectors may break** - if DA updates their frontend, the scraping logic may need updating. The script targets the `<h2>Projects</h2>` heading and the table that follows it.
+
+---
 
 ## Project Structure
 
@@ -103,6 +117,8 @@ DA-Task-Alert/
 └── shared/
     └── config.example.env       # Configuration template
 ```
+
+---
 
 ## License
 
