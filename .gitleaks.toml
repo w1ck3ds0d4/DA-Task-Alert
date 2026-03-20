@@ -1,0 +1,19 @@
+title = "DA-Task-Alert Secret Scanning"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "DA-Task-Alert allowlist"
+paths = [
+  '''\.env\.example''',
+  '''config\.example\.env''',
+  '''__pycache__''',
+  '''\.pyc$''',
+]
+
+[[rules]]
+id = "da-session-cookie"
+description = "DataAnnotation session cookie in source code"
+regex = '''(?i)(DA_SESSION_COOKIE|conv_session)\s*[=:]\s*['"][a-zA-Z0-9_\-]{20,}['"]'''
+tags = ["credential", "da-task-alert"]
