@@ -6,9 +6,9 @@ Run DA Task Alert 24/7 on an Oracle Cloud free-tier VM.
 
 1. Sign up at [cloud.oracle.com](https://cloud.oracle.com) (Always Free tier, no credit card charge)
 2. Create a **Compute Instance**:
-   - Shape: `VM.Standard.E2.1.Micro` (Always Free)
-   - Image: Ubuntu 22.04+
-   - Generate SSH keys during creation
+  - Shape: `VM.Standard.E2.1.Micro` (Always Free)
+  - Image: Ubuntu 22.04+
+  - Generate SSH keys during creation
 
 ## 2. Connect and Install
 
