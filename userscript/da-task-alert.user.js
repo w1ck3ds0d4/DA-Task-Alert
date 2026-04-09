@@ -126,7 +126,7 @@
     }
 
     if (!container) {
-      console.log("[DA Alert] No projects table found — likely no available projects.");
+      console.log("[DA Alert] No projects table found - likely no available projects.");
       return projects;
     }
 
