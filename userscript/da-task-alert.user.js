@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         DA Task Alert
-// @namespace    https://github.com/w1ck3ds0d4/DA-Task-Alert
+// @namespace    https://github.com/WickedSoda/DA-Task-Alert
 // @version      1.2.0
 // @description  Monitor DataAnnotation for new paid projects and send push alerts via ntfy.sh
 // @author       WickedSoda
@@ -12,8 +12,6 @@
 // @grant        GM_registerMenuCommand
 // @connect      ntfy.sh
 // @run-at       document-idle
-// @downloadURL  https://raw.githubusercontent.com/w1ck3ds0d4/DA-Task-Alert/main/userscript/da-task-alert.user.js
-// @updateURL    https://raw.githubusercontent.com/w1ck3ds0d4/DA-Task-Alert/main/userscript/da-task-alert.user.js
 // ==/UserScript==
 
 (function () {
@@ -75,19 +73,15 @@
   }
 
   // ─── DOM Scraping ───────────────────────────────────────────────────
-  // DA uses Tailwind CSS with divs, not semantic HTML tables.
-  // Actual structure (as of 2026-04):
-  //   <h3 class="tw-text-h3 ...">Projects</h3>
-  //   ...
-  //   <div class="active-table">
-  //     (header row with Name, Pay, Tasks, Created columns)
-  //     (data rows with project links)
-  //   </div>
+  // DA page structure as of 2026-04 (tab layout):
+  //   Tabs: Projects | Qualifications | Surveys | Report Time
+  //   Projects tab panel contains a table with Name, Pay, Tasks, Created columns.
+  // Older layout used <h2>Projects</h2> above the table.
 
   function scrapeProjects(doc) {
     const projects = [];
 
-    // Early exit: explicit empty state
+    // Early exit: explicit empty state message
     const bodyText = (doc.body?.innerText || "").toLowerCase();
     if (
       bodyText.includes("there aren't any projects available") ||
@@ -97,9 +91,86 @@
       return projects;
     }
 
-    // Find the Projects section anchor.
-    // Old layout: <h2>/<h3> heading with text "Projects"
-    // New layout (2026-04): tab button/link whose text starts with "Projects"
+    // Strategy 1: Find a <table> with Name/Pay/Tasks headers directly.
+    // Works for both old heading layout and new tab layout without needing the anchor.
+    let projectsTable = null;
+    for (const table of doc.querySelectorAll("table")) {
+      const tableText = table.textContent.substring(0, 500).toLowerCase();
+      if (
+        tableText.includes("total time reported") ||
+        tableText.includes("report time")
+      ) {
+        console.log("[DA Alert] Skipping Report Time table");
+        continue;
+      }
+      const thead = table.querySelector("thead, tr");
+      if (thead) {
+        const headerText = thead.textContent.toLowerCase();
+        if (
+          headerText.includes("name") &&
+          (headerText.includes("pay") || headerText.includes("tasks"))
+        ) {
+          projectsTable = table;
+          break;
+        }
+      }
+      if (!projectsTable) projectsTable = table;
+    }
+
+    if (projectsTable) {
+      let nameCol = 0, payCol = -1, tasksCol = -1, createdCol = -1;
+      const thead = projectsTable.querySelector("thead");
+      if (thead) {
+        thead.querySelectorAll("th").forEach((th, i) => {
+          const text = th.textContent.trim().toLowerCase();
+          if (text === "name") nameCol = i;
+          else if (text === "pay") payCol = i;
+          else if (text === "tasks") tasksCol = i;
+          else if (text === "created") createdCol = i;
+        });
+      }
+
+      for (const row of projectsTable.querySelectorAll("tbody tr, tr")) {
+        if (row.querySelector("th")) continue;
+        const cells = row.querySelectorAll("td");
+        if (cells.length === 0) continue;
+
+        const nameCell = cells[nameCol];
+        if (!nameCell) continue;
+        const link = nameCell.querySelector("a");
+        const name = (link || nameCell).textContent.trim();
+        if (!name) continue;
+
+        const rowText = row.textContent;
+        if (/\d+h\s*\d*m|\d+min/.test(rowText)) {
+          console.log("[DA Alert] Skipping already-worked project:", name);
+          continue;
+        }
+
+        const pay =
+          payCol >= 0 && cells[payCol]
+            ? cells[payCol].textContent.trim()
+            : "";
+        const tasks =
+          tasksCol >= 0 && cells[tasksCol]
+            ? cells[tasksCol].textContent.trim()
+            : "";
+        const created =
+          createdCol >= 0 && cells[createdCol]
+            ? cells[createdCol].textContent.trim()
+            : "";
+
+        projects.push({ name, pay, tasks, created, id: name });
+      }
+
+      console.log(
+        "[DA Alert] Scraped projects from table:",
+        projects.map((p) => p.name),
+      );
+      return projects;
+    }
+
+    // Strategy 2: Find the Projects anchor (heading or tab element) and walk to container.
     let projectsAnchor = null;
 
     for (const el of doc.querySelectorAll("h1, h2, h3, h4, h5, h6")) {
@@ -110,7 +181,9 @@
     }
 
     if (!projectsAnchor) {
-      for (const el of doc.querySelectorAll("button, a, [role='tab'], li")) {
+      for (const el of doc.querySelectorAll(
+        "button, a, [role='tab'], li",
+      )) {
         const text = el.textContent.trim().toLowerCase();
         if (text === "projects" || text.startsWith("projects ")) {
           projectsAnchor = el;
@@ -120,92 +193,45 @@
     }
 
     if (!projectsAnchor) {
-      projectsAnchor = doc.querySelector(
-        "[role='tabpanel'], #projects, .projects-section",
-      );
-    }
-
-    if (!projectsAnchor) {
-      console.warn("[DA Alert] Could not find Projects section.");
+      console.warn("[DA Alert] Could not find 'Projects' section on page.");
       return projects;
     }
 
-    console.log(
-      "[DA Alert] Found Projects anchor:",
-      projectsAnchor.tagName,
-      projectsAnchor.textContent.trim().substring(0, 30),
-    );
+    console.log("[DA Alert] Found Projects anchor:", projectsAnchor.tagName);
 
     let container = null;
-    let searchRoot = projectsAnchor.closest("div") || doc.body;
-
-    while (searchRoot && !container) {
-      const candidates = searchRoot.querySelectorAll(".active-table, table");
+    let parent = projectsAnchor.closest("div");
+    while (parent && !container) {
+      const candidates = parent.querySelectorAll(
+        ".active-table, table, [role='tabpanel']",
+      );
       for (const c of candidates) {
         const headerText = c.textContent.substring(0, 500).toLowerCase();
         if (
           headerText.includes("total time reported") ||
           headerText.includes("report time")
         ) {
-          console.log("[DA Alert] Skipping Report Time table");
           continue;
         }
         container = c;
         break;
       }
-      if (!container) searchRoot = searchRoot.parentElement;
+      if (!container) parent = parent.parentElement;
     }
 
     if (!container) {
       console.log(
-        "[DA Alert] No projects table found - likely no available projects.",
+        "[DA Alert] No projects container found - likely no available projects.",
       );
       return projects;
     }
 
-    console.log(
-      "[DA Alert] Found container:",
-      container.className.substring(0, 50),
-    );
-
-    // Strategy 3: If it's an actual <table>, parse traditionally
-    if (container.tagName === "TABLE") {
-      const rows = container.querySelectorAll("tbody tr, tr");
-      for (const row of rows) {
-        if (row.querySelector("th")) continue;
-        const cells = row.querySelectorAll("td");
-        if (cells.length === 0) continue;
-
-        // Skip projects that already have time reported (already worked on)
-        const rowText = row.textContent;
-        if (/\d+h\s*\d*m|\d+min/.test(rowText)) {
-          const link = cells[0].querySelector("a");
-          console.log(
-            "[DA Alert] Skipping already-worked project:",
-            (link || cells[0]).textContent.trim(),
-          );
-          continue;
-        }
-
-        const link = cells[0].querySelector("a");
-        const name = (link || cells[0]).textContent.trim();
-        if (!name) continue;
-        const pay = cells[1] ? cells[1].textContent.trim() : "";
-        const tasks = cells[2] ? cells[2].textContent.trim() : "";
-        const created = cells[3] ? cells[3].textContent.trim() : "";
-        projects.push({ name, pay, tasks, created, id: name });
-      }
-      return projects;
-    }
-
-    // Strategy 4: Div-based table (Tailwind) - find all links to projects
-    // Each project row contains a link with the project name
+    // Parse div-based table (Tailwind)
     const links = container.querySelectorAll("a[href]");
     for (const link of links) {
       const name = link.textContent.trim();
       const href = link.getAttribute("href") || "";
 
-      // Skip non-project links (e.g., navigation, buttons)
       if (!name || name.length < 5) continue;
       if (
         !href.includes("project") &&
@@ -214,60 +240,25 @@
       )
         continue;
 
-      // Try to find pay/tasks/created in the same row (parent container)
       const row =
-        link.closest("tr, [class*='tw-']")?.parentElement?.closest("div, tr") ||
-        link.parentElement;
+        link.closest("tr, [class*='tw-']")?.parentElement?.closest(
+          "div, tr",
+        ) || link.parentElement;
       const rowText = row ? row.textContent : "";
 
-      // Skip projects that already have time reported (already worked on)
       if (/\d+h\s*\d*m|\d+min/.test(rowText)) {
         console.log("[DA Alert] Skipping already-worked project:", name);
         continue;
       }
 
       const payMatch = rowText.match(/\$[\d.]+\/hr/);
-      const pay = payMatch ? payMatch[0] : "";
-
-      // Extract just the task count number near the project
-      const tasks = "";
-      const created = "";
-
-      projects.push({ name, pay, tasks, created, id: name });
-    }
-
-    // Strategy 5: If no links found, try getting all text rows from the container
-    if (projects.length === 0) {
-      console.log(
-        "[DA Alert] No links found in container, trying text rows...",
-      );
-      // Get all direct child divs that look like rows (have multiple child divs)
-      const rows = container.querySelectorAll("div > div");
-      for (const row of rows) {
-        const text = row.textContent.trim();
-        // Skip header-like rows and very short text
-        if (text.toLowerCase().startsWith("name") || text.length < 5) continue;
-        if (text.includes("Hide") && text.includes("Created")) continue; // header row
-
-        // Skip projects that already have time reported (already worked on)
-        if (/\d+h\s*\d*m|\d+min/.test(text)) continue;
-
-        // First meaningful text chunk is likely the project name
-        const firstChild = row.querySelector("a, span, div");
-        const name = firstChild
-          ? firstChild.textContent.trim()
-          : text.substring(0, 100);
-        if (name && name.length > 5) {
-          const payMatch = text.match(/\$[\d.]+\/hr/);
-          projects.push({
-            name,
-            pay: payMatch ? payMatch[0] : "",
-            tasks: "",
-            created: "",
-            id: name,
-          });
-        }
-      }
+      projects.push({
+        name,
+        pay: payMatch ? payMatch[0] : "",
+        tasks: "",
+        created: "",
+        id: name,
+      });
     }
 
     console.log(
