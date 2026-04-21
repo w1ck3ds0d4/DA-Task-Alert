@@ -99,43 +99,55 @@ def fetch_projects_page(session):
 
 
 # ─── HTML Parsing ──────────────────────────────────────────────────────────────
-# DA page structure (as of 2026-04):
-#   <h2>Projects</h2>
-#   <table>
-#     <thead><tr><th>Name</th><th>Pay</th><th>Tasks</th><th>Created</th>...</tr></thead>
-#     <tbody><tr><td><a href="...">Project Name</a></td><td>$28.00/hr</td><td>9</td><td>Apr 4</td>...</tr></tbody>
-#   </table>
+# DA page structure as of 2026-04 (tab layout):
+#   Tabs: Projects | Qualifications | Surveys | Report Time
+#   Projects tab panel contains a table with Name, Pay, Tasks, Created columns,
+#   or an empty state message when no projects are available.
+# Older layout used <h2>Projects</h2> above the table.
 
 def parse_projects(html):
     """Parse project listings from DA dashboard HTML - only the Projects section."""
     soup = BeautifulSoup(html, "html.parser")
     projects = []
 
-    # Find the "Projects" heading
-    projects_heading = None
-    for h2 in soup.find_all("h2"):
-        if h2.get_text(strip=True).lower() == "projects":
-            projects_heading = h2
-            break
-
-    if not projects_heading:
-        print("[!] Could not find 'Projects' heading on page.", file=sys.stderr)
+    # Early exit: explicit empty state message
+    page_text = soup.get_text(separator=" ").lower()
+    if "there aren't any projects available" in page_text or \
+       "no projects available for you" in page_text:
+        print("[*] No projects available (empty state).")
         return projects
 
-    # Find the table after the Projects heading
+    # Find the Projects section anchor.
+    # Old layout: <h2> heading. New layout: tab button/link.
+    projects_anchor = None
+
+    for tag in ["h1", "h2", "h3", "h4", "h5", "h6"]:
+        for el in soup.find_all(tag):
+            if el.get_text(strip=True).lower() == "projects":
+                projects_anchor = el
+                break
+        if projects_anchor:
+            break
+
+    if not projects_anchor:
+        for el in soup.find_all(["button", "a", "li"]):
+            text = el.get_text(strip=True).lower()
+            if text == "projects" or text.startswith("projects "):
+                projects_anchor = el
+                break
+
+    if not projects_anchor:
+        print("[!] Could not find 'Projects' section on page.", file=sys.stderr)
+        return projects
+
+    # Find the table - search forward from the anchor, skip Report Time tables
     table = None
-    el = projects_heading.find_next_sibling()
-    while el:
-        if el.name == "table":
-            table = el
-            break
-        if el.name == "h2":
-            break
-        nested = el.find("table")
-        if nested:
-            table = nested
-            break
-        el = el.find_next_sibling()
+    for candidate in soup.find_all("table"):
+        candidate_text = candidate.get_text(separator=" ", strip=True)[:500].lower()
+        if "total time reported" in candidate_text or "report time" in candidate_text:
+            continue
+        table = candidate
+        break
 
     if not table:
         print("[!] Could not find projects table.", file=sys.stderr)

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         DA Task Alert
 // @namespace    https://github.com/WickedSoda/DA-Task-Alert
-// @version      1.1.0
+// @version      1.2.0
 // @description  Monitor DataAnnotation for new paid projects and send push alerts via ntfy.sh
 // @author       WickedSoda
 // @match        https://app.dataannotation.tech/workers/*
@@ -85,35 +85,53 @@
   function scrapeProjects(doc) {
     const projects = [];
 
-    // Strategy 1: Find the "Projects" heading (could be h2, h3, or any heading)
-    let projectsHeading = null;
+    // Early exit: explicit empty state
+    const bodyText = (doc.body?.innerText || "").toLowerCase();
+    if (bodyText.includes("there aren't any projects available") ||
+        bodyText.includes("no projects available for you")) {
+      console.log("[DA Alert] Empty state - no projects available.");
+      return projects;
+    }
+
+    // Find the Projects section anchor.
+    // Old layout: <h2>/<h3> heading with text "Projects"
+    // New layout (2026-04): tab button/link whose text starts with "Projects"
+    let projectsAnchor = null;
+
     for (const el of doc.querySelectorAll("h1, h2, h3, h4, h5, h6")) {
       if (el.textContent.trim().toLowerCase() === "projects") {
-        projectsHeading = el;
+        projectsAnchor = el;
         break;
       }
     }
 
-    if (!projectsHeading) {
-      console.warn("[DA Alert] Could not find 'Projects' heading on page.");
+    if (!projectsAnchor) {
+      for (const el of doc.querySelectorAll("button, a, [role='tab'], li")) {
+        const text = el.textContent.trim().toLowerCase();
+        if (text === "projects" || text.startsWith("projects ")) {
+          projectsAnchor = el;
+          break;
+        }
+      }
+    }
+
+    if (!projectsAnchor) {
+      projectsAnchor = doc.querySelector("[role='tabpanel'], #projects, .projects-section");
+    }
+
+    if (!projectsAnchor) {
+      console.warn("[DA Alert] Could not find Projects section.");
       return projects;
     }
 
-    console.log("[DA Alert] Found Projects heading:", projectsHeading.tagName);
+    console.log("[DA Alert] Found Projects anchor:", projectsAnchor.tagName, projectsAnchor.textContent.trim().substring(0, 30));
 
-    // Strategy 2: Find the active-table div or any table-like container after the heading.
-    // Important: only look within the Projects section, NOT in "Report Time" or other sections.
-    // The page has a "Projects" section (available work) and a "Report Time" section (already done).
-    // We must only scrape from the Projects section.
     let container = null;
+    let searchRoot = projectsAnchor.closest("div") || doc.body;
 
-    // Walk up from Projects heading looking for a table container
-    let parent = projectsHeading.closest("div");
-    while (parent && !container) {
-      const candidates = parent.querySelectorAll(".active-table, table");
+    while (searchRoot && !container) {
+      const candidates = searchRoot.querySelectorAll(".active-table, table");
       for (const c of candidates) {
-        // Reject tables that belong to the "Report Time" section.
-        // These have a "Total Time Reported" column header or nearby "Report Time" text.
         const headerText = c.textContent.substring(0, 500).toLowerCase();
         if (headerText.includes("total time reported") || headerText.includes("report time")) {
           console.log("[DA Alert] Skipping Report Time table");
@@ -122,7 +140,7 @@
         container = c;
         break;
       }
-      if (!container) parent = parent.parentElement;
+      if (!container) searchRoot = searchRoot.parentElement;
     }
 
     if (!container) {
