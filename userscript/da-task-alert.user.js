@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         DA Task Alert
-// @namespace    https://github.com/WickedSoda/DA-Task-Alert
+// @namespace    https://github.com/w1ck3ds0d4/DA-Task-Alert
 // @version      1.2.0
 // @description  Monitor DataAnnotation for new paid projects and send push alerts via ntfy.sh
 // @author       WickedSoda
@@ -12,6 +12,8 @@
 // @grant        GM_registerMenuCommand
 // @connect      ntfy.sh
 // @run-at       document-idle
+// @downloadURL  https://raw.githubusercontent.com/w1ck3ds0d4/DA-Task-Alert/main/userscript/da-task-alert.user.js
+// @updateURL    https://raw.githubusercontent.com/w1ck3ds0d4/DA-Task-Alert/main/userscript/da-task-alert.user.js
 // ==/UserScript==
 
 (function () {
@@ -87,8 +89,10 @@
 
     // Early exit: explicit empty state
     const bodyText = (doc.body?.innerText || "").toLowerCase();
-    if (bodyText.includes("there aren't any projects available") ||
-        bodyText.includes("no projects available for you")) {
+    if (
+      bodyText.includes("there aren't any projects available") ||
+      bodyText.includes("no projects available for you")
+    ) {
       console.log("[DA Alert] Empty state - no projects available.");
       return projects;
     }
@@ -116,7 +120,9 @@
     }
 
     if (!projectsAnchor) {
-      projectsAnchor = doc.querySelector("[role='tabpanel'], #projects, .projects-section");
+      projectsAnchor = doc.querySelector(
+        "[role='tabpanel'], #projects, .projects-section",
+      );
     }
 
     if (!projectsAnchor) {
@@ -124,7 +130,11 @@
       return projects;
     }
 
-    console.log("[DA Alert] Found Projects anchor:", projectsAnchor.tagName, projectsAnchor.textContent.trim().substring(0, 30));
+    console.log(
+      "[DA Alert] Found Projects anchor:",
+      projectsAnchor.tagName,
+      projectsAnchor.textContent.trim().substring(0, 30),
+    );
 
     let container = null;
     let searchRoot = projectsAnchor.closest("div") || doc.body;
@@ -133,7 +143,10 @@
       const candidates = searchRoot.querySelectorAll(".active-table, table");
       for (const c of candidates) {
         const headerText = c.textContent.substring(0, 500).toLowerCase();
-        if (headerText.includes("total time reported") || headerText.includes("report time")) {
+        if (
+          headerText.includes("total time reported") ||
+          headerText.includes("report time")
+        ) {
           console.log("[DA Alert] Skipping Report Time table");
           continue;
         }
@@ -144,11 +157,16 @@
     }
 
     if (!container) {
-      console.log("[DA Alert] No projects table found - likely no available projects.");
+      console.log(
+        "[DA Alert] No projects table found - likely no available projects.",
+      );
       return projects;
     }
 
-    console.log("[DA Alert] Found container:", container.className.substring(0, 50));
+    console.log(
+      "[DA Alert] Found container:",
+      container.className.substring(0, 50),
+    );
 
     // Strategy 3: If it's an actual <table>, parse traditionally
     if (container.tagName === "TABLE") {
@@ -162,7 +180,10 @@
         const rowText = row.textContent;
         if (/\d+h\s*\d*m|\d+min/.test(rowText)) {
           const link = cells[0].querySelector("a");
-          console.log("[DA Alert] Skipping already-worked project:", (link || cells[0]).textContent.trim());
+          console.log(
+            "[DA Alert] Skipping already-worked project:",
+            (link || cells[0]).textContent.trim(),
+          );
           continue;
         }
 
@@ -186,10 +207,17 @@
 
       // Skip non-project links (e.g., navigation, buttons)
       if (!name || name.length < 5) continue;
-      if (!href.includes("project") && !href.includes("task") && !href.includes("/workers/")) continue;
+      if (
+        !href.includes("project") &&
+        !href.includes("task") &&
+        !href.includes("/workers/")
+      )
+        continue;
 
       // Try to find pay/tasks/created in the same row (parent container)
-      const row = link.closest("tr, [class*='tw-']")?.parentElement?.closest("div, tr") || link.parentElement;
+      const row =
+        link.closest("tr, [class*='tw-']")?.parentElement?.closest("div, tr") ||
+        link.parentElement;
       const rowText = row ? row.textContent : "";
 
       // Skip projects that already have time reported (already worked on)
@@ -210,7 +238,9 @@
 
     // Strategy 5: If no links found, try getting all text rows from the container
     if (projects.length === 0) {
-      console.log("[DA Alert] No links found in container, trying text rows...");
+      console.log(
+        "[DA Alert] No links found in container, trying text rows...",
+      );
       // Get all direct child divs that look like rows (have multiple child divs)
       const rows = container.querySelectorAll("div > div");
       for (const row of rows) {
@@ -224,15 +254,26 @@
 
         // First meaningful text chunk is likely the project name
         const firstChild = row.querySelector("a, span, div");
-        const name = firstChild ? firstChild.textContent.trim() : text.substring(0, 100);
+        const name = firstChild
+          ? firstChild.textContent.trim()
+          : text.substring(0, 100);
         if (name && name.length > 5) {
           const payMatch = text.match(/\$[\d.]+\/hr/);
-          projects.push({ name, pay: payMatch ? payMatch[0] : "", tasks: "", created: "", id: name });
+          projects.push({
+            name,
+            pay: payMatch ? payMatch[0] : "",
+            tasks: "",
+            created: "",
+            id: name,
+          });
         }
       }
     }
 
-    console.log("[DA Alert] Scraped projects:", projects.map(p => p.name));
+    console.log(
+      "[DA Alert] Scraped projects:",
+      projects.map((p) => p.name),
+    );
     return projects;
   }
 
@@ -243,12 +284,18 @@
   function filterProjects(projects) {
     const keywordsStr = getSetting("keywords").trim();
     const includeKeywords = keywordsStr
-      ? keywordsStr.split(",").map((k) => k.trim().toLowerCase()).filter(Boolean)
+      ? keywordsStr
+          .split(",")
+          .map((k) => k.trim().toLowerCase())
+          .filter(Boolean)
       : [];
 
     const excludeStr = getSetting("excludeKeywords").trim();
     const excludeKeywords = excludeStr
-      ? excludeStr.split(",").map((k) => k.trim().toLowerCase()).filter(Boolean)
+      ? excludeStr
+          .split(",")
+          .map((k) => k.trim().toLowerCase())
+          .filter(Boolean)
       : [];
 
     return projects.filter((p) => {
@@ -267,7 +314,12 @@
   }
 
   // ─── Notifications ─────────────────────────────────────────────────
-  function sendNtfyAlert(title, body, tags = "money,rocket", priority = "high") {
+  function sendNtfyAlert(
+    title,
+    body,
+    tags = "money,rocket",
+    priority = "high",
+  ) {
     const topic = sanitizeTopic(getSetting("ntfyTopic"));
     if (!topic) {
       console.warn("[DA Alert] No ntfy topic configured.");
@@ -325,7 +377,7 @@
     if (newProjects.length > 3) {
       sendNtfyAlert(
         "DA Alert: Multiple New Projects",
-        `${newProjects.length} new projects available!`
+        `${newProjects.length} new projects available!`,
       );
     }
   }
@@ -350,9 +402,14 @@
     const freshDoc = document;
 
     const allProjects = scrapeProjects(freshDoc);
-    console.log(`[DA Alert] Scraped ${allProjects.length} total project(s):`, allProjects.map(p => p.name));
+    console.log(
+      `[DA Alert] Scraped ${allProjects.length} total project(s):`,
+      allProjects.map((p) => p.name),
+    );
     const filtered = filterProjects(allProjects);
-    console.log(`[DA Alert] After filtering: ${filtered.length} paid, ${allProjects.length - filtered.length} excluded`);
+    console.log(
+      `[DA Alert] After filtering: ${filtered.length} paid, ${allProjects.length - filtered.length} excluded`,
+    );
     console.log(`[DA Alert] Currently seen: ${seenProjects.size} project(s)`);
 
     // Remove projects from seen list that are no longer on the dashboard.
@@ -361,14 +418,19 @@
     const removed = [...seenProjects].filter((id) => !currentIds.has(id));
     if (removed.length > 0) {
       removed.forEach((id) => seenProjects.delete(id));
-      console.log(`[DA Alert] Removed ${removed.length} project(s) no longer on dashboard:`, removed);
+      console.log(
+        `[DA Alert] Removed ${removed.length} project(s) no longer on dashboard:`,
+        removed,
+      );
     }
 
     const newProjects = filtered.filter((p) => !seenProjects.has(p.id));
 
     if (newProjects.length > 0) {
       if (isFirstCheck) {
-        console.log(`[DA Alert] First run - found ${newProjects.length} paid project(s) on dashboard.`);
+        console.log(
+          `[DA Alert] First run - found ${newProjects.length} paid project(s) on dashboard.`,
+        );
       } else {
         console.log(`[DA Alert] Found ${newProjects.length} new project(s)!`);
       }
@@ -379,7 +441,9 @@
       GM_setValue("seenProjects", JSON.stringify([...seenProjects]));
       newThisSession += newProjects.length;
     } else {
-      console.log(`[DA Alert] No new projects. (${filtered.length} tracked, ${allProjects.length - filtered.length} filtered out)`);
+      console.log(
+        `[DA Alert] No new projects. (${filtered.length} tracked, ${allProjects.length - filtered.length} filtered out)`,
+      );
       isFirstCheck = false;
     }
 
@@ -473,13 +537,19 @@
 
     document.getElementById("da-toggle").addEventListener("click", () => {
       panel.classList.toggle("collapsed");
-      document.getElementById("da-toggle").innerHTML = panel.classList.contains("collapsed")
+      document.getElementById("da-toggle").innerHTML = panel.classList.contains(
+        "collapsed",
+      )
         ? "&#9650;"
         : "&#9660;";
     });
 
-    document.getElementById("da-btn-settings").addEventListener("click", openSettings);
-    document.getElementById("da-btn-check").addEventListener("click", () => checkForNewProjects());
+    document
+      .getElementById("da-btn-settings")
+      .addEventListener("click", openSettings);
+    document
+      .getElementById("da-btn-check")
+      .addEventListener("click", () => checkForNewProjects());
     document.getElementById("da-btn-clear").addEventListener("click", () => {
       seenProjects.clear();
       GM_setValue("seenProjects", "[]");
@@ -585,20 +655,27 @@
 
     // Set input values safely via DOM properties (not innerHTML) to prevent XSS
     document.getElementById("da-set-topic").value = getSetting("ntfyTopic");
-    document.getElementById("da-set-interval").value = getSetting("pollInterval");
+    document.getElementById("da-set-interval").value =
+      getSetting("pollInterval");
     document.getElementById("da-set-keywords").value = getSetting("keywords");
-    document.getElementById("da-set-exclude").value = getSetting("excludeKeywords");
-    document.getElementById("da-set-desktop").checked = getSetting("desktopNotify");
+    document.getElementById("da-set-exclude").value =
+      getSetting("excludeKeywords");
+    document.getElementById("da-set-desktop").checked =
+      getSetting("desktopNotify");
     document.getElementById("da-set-enabled").checked = getSetting("enabled");
 
     modal.addEventListener("click", (e) => {
       if (e.target === modal) modal.remove();
     });
 
-    document.getElementById("da-set-cancel").addEventListener("click", () => modal.remove());
+    document
+      .getElementById("da-set-cancel")
+      .addEventListener("click", () => modal.remove());
 
     document.getElementById("da-set-test").addEventListener("click", () => {
-      const topic = sanitizeTopic(document.getElementById("da-set-topic").value);
+      const topic = sanitizeTopic(
+        document.getElementById("da-set-topic").value,
+      );
       if (!topic) {
         alert("Enter an ntfy topic first!");
         return;
@@ -606,44 +683,71 @@
       GM_xmlhttpRequest({
         method: "POST",
         url: `https://ntfy.sh/${topic}`,
-        headers: { Title: "DA Alert Test", Tags: "white_check_mark", Priority: "default" },
+        headers: {
+          Title: "DA Alert Test",
+          Tags: "white_check_mark",
+          Priority: "default",
+        },
         data: "If you see this, notifications are working!",
         onload: () => alert("Test notification sent! Check your phone."),
         onerror: () => alert("Failed to send. Check the topic name."),
       });
     });
 
-    document.getElementById("da-set-test-desktop").addEventListener("click", () => {
-      if (typeof GM_notification === "function") {
-        GM_notification({
-          title: "DA Alert Test",
-          text: "If you see this, desktop notifications are working!",
-          timeout: 10000,
-        });
-        alert("Desktop notification sent! You should see it now.");
-      } else if (Notification.permission === "granted") {
-        new Notification("DA Alert Test", { body: "If you see this, desktop notifications are working!" });
-        alert("Desktop notification sent!");
-      } else {
-        Notification.requestPermission().then((perm) => {
-          if (perm === "granted") {
-            new Notification("DA Alert Test", { body: "If you see this, desktop notifications are working!" });
-            alert("Desktop notification sent!");
-          } else {
-            alert("Desktop notifications were denied. Please allow them in browser settings.");
-          }
-        });
-      }
-    });
+    document
+      .getElementById("da-set-test-desktop")
+      .addEventListener("click", () => {
+        if (typeof GM_notification === "function") {
+          GM_notification({
+            title: "DA Alert Test",
+            text: "If you see this, desktop notifications are working!",
+            timeout: 10000,
+          });
+          alert("Desktop notification sent! You should see it now.");
+        } else if (Notification.permission === "granted") {
+          new Notification("DA Alert Test", {
+            body: "If you see this, desktop notifications are working!",
+          });
+          alert("Desktop notification sent!");
+        } else {
+          Notification.requestPermission().then((perm) => {
+            if (perm === "granted") {
+              new Notification("DA Alert Test", {
+                body: "If you see this, desktop notifications are working!",
+              });
+              alert("Desktop notification sent!");
+            } else {
+              alert(
+                "Desktop notifications were denied. Please allow them in browser settings.",
+              );
+            }
+          });
+        }
+      });
 
     document.getElementById("da-set-save").addEventListener("click", () => {
-      const interval = Math.max(300, parseInt(document.getElementById("da-set-interval").value) || 300);
+      const interval = Math.max(
+        300,
+        parseInt(document.getElementById("da-set-interval").value) || 300,
+      );
 
-      setSetting("ntfyTopic", sanitizeTopic(document.getElementById("da-set-topic").value.trim()));
+      setSetting(
+        "ntfyTopic",
+        sanitizeTopic(document.getElementById("da-set-topic").value.trim()),
+      );
       setSetting("pollInterval", interval);
-      setSetting("keywords", document.getElementById("da-set-keywords").value.trim());
-      setSetting("excludeKeywords", document.getElementById("da-set-exclude").value.trim());
-      setSetting("desktopNotify", document.getElementById("da-set-desktop").checked);
+      setSetting(
+        "keywords",
+        document.getElementById("da-set-keywords").value.trim(),
+      );
+      setSetting(
+        "excludeKeywords",
+        document.getElementById("da-set-exclude").value.trim(),
+      );
+      setSetting(
+        "desktopNotify",
+        document.getElementById("da-set-desktop").checked,
+      );
       setSetting("enabled", document.getElementById("da-set-enabled").checked);
 
       const topicEl = document.getElementById("da-topic");
