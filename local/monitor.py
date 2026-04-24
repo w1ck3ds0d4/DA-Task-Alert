@@ -6,6 +6,7 @@ Works both locally and on headless servers (Oracle free tier).
 """
 
 import argparse
+import html
 import json
 import os
 import sys
@@ -101,48 +102,86 @@ def fetch_projects_page(session):
 
 
 # ─── HTML Parsing ──────────────────────────────────────────────────────────────
-# DA page structure as of 2026-04 (tab layout):
-#   Tabs: Projects | Qualifications | Surveys | Report Time
-#   Projects tab panel contains a table with Name, Pay, Tasks, Created columns,
-#   or an empty state message when no projects are available.
-# Older layout used <h2>Projects</h2> above the table.
+# DA renders the dashboard client-side via React. The projects list is embedded
+# into a hybrid root div as a JSON blob on `data-props`, NOT into an HTML
+# <table>. Previous versions of this script scraped a table that no longer
+# exists in the DOM, which silently returned zero projects.
+#
+# The JSON shape (as of 2026-04):
+#   { "dashboardMerchTargeting": { "projects": [
+#       { "name": "...", "id": "...", "pay": "$21.00/hr",
+#         "availableTasksFor": "1", "created": "...Z", "bonusBadge": false,
+#         "bonusDescription": null, ... }
+#     ] },
+#     "hiddenProjects": { "<id>": true, ... },
+#     "reportableProjectsInfo": [ ... ] }  # already-started projects
+#
+# We pull from `dashboardMerchTargeting.projects` (the dashboard feed) and
+# skip any id present in `hiddenProjects` (the user's server-side hide list).
 
-def parse_projects(html):
-    """Parse project listings from DA dashboard HTML - only the Projects section."""
-    soup = BeautifulSoup(html, "html.parser")
+HYBRID_ROOT_ID = "workers/WorkerProjectsTable-hybrid-root"
+
+
+def parse_projects(html_text):
+    """Parse project listings from DA dashboard HTML.
+
+    Returns a list of dicts: {name, id, pay, tasks, created}.
+    `tasks` is the string `availableTasksFor` from the JSON payload.
+    Empty list on any parse failure; callers decide whether that means
+    'nothing available' or 'page shape broke'.
+    """
+    soup = BeautifulSoup(html_text, "html.parser")
     projects = []
 
-    # Early exit: explicit empty state message
+    root = soup.find("div", id=HYBRID_ROOT_ID)
+    if not root or not root.get("data-props"):
+        # Fall back: old table scraper path, in case DA rolls back or
+        # a future layout drops data-props entirely.
+        return _parse_projects_legacy_table(soup)
+
+    raw = root["data-props"]
+    # BeautifulSoup already decodes HTML entities on attribute reads, but
+    # `html.unescape` is idempotent and protects against rawer HTML sources.
+    try:
+        data = json.loads(html.unescape(raw))
+    except json.JSONDecodeError as e:
+        print(f"[!] Failed to decode data-props JSON: {e}", file=sys.stderr)
+        return projects
+
+    hidden = set((data.get("hiddenProjects") or {}).keys())
+    raw_projects = (
+        (data.get("dashboardMerchTargeting") or {}).get("projects") or []
+    )
+
+    for p in raw_projects:
+        pid = p.get("id") or ""
+        if pid in hidden:
+            continue
+        name = (p.get("name") or "").strip()
+        if not name:
+            continue
+        projects.append({
+            "name": name,
+            "id": pid,
+            "pay": (p.get("pay") or "").strip(),
+            "tasks": str(p.get("availableTasksFor") or "").strip(),
+            "created": p.get("created") or "",
+        })
+
+    return projects
+
+
+def _parse_projects_legacy_table(soup):
+    """Legacy scraper kept as a fallback for older DA layouts / non-SPA
+    error pages. Only runs when the hybrid root div is missing."""
+    projects = []
+
     page_text = soup.get_text(separator=" ").lower()
     if "there aren't any projects available" in page_text or \
        "no projects available for you" in page_text:
         print("[*] No projects available (empty state).")
         return projects
 
-    # Find the Projects section anchor.
-    # Old layout: <h2> heading. New layout: tab button/link.
-    projects_anchor = None
-
-    for tag in ["h1", "h2", "h3", "h4", "h5", "h6"]:
-        for el in soup.find_all(tag):
-            if el.get_text(strip=True).lower() == "projects":
-                projects_anchor = el
-                break
-        if projects_anchor:
-            break
-
-    if not projects_anchor:
-        for el in soup.find_all(["button", "a", "li"]):
-            text = el.get_text(strip=True).lower()
-            if text == "projects" or text.startswith("projects "):
-                projects_anchor = el
-                break
-
-    if not projects_anchor:
-        print("[!] Could not find 'Projects' section on page.", file=sys.stderr)
-        return projects
-
-    # Find the table - search forward from the anchor, skip Report Time tables
     table = None
     for candidate in soup.find_all("table"):
         candidate_text = candidate.get_text(separator=" ", strip=True)[:500].lower()
@@ -152,10 +191,10 @@ def parse_projects(html):
         break
 
     if not table:
-        print("[!] Could not find projects table.", file=sys.stderr)
+        print("[!] Could not find projects data (no hybrid root, no table).",
+              file=sys.stderr)
         return projects
 
-    # Determine column indices from header row
     name_col, pay_col, tasks_col, created_col = 0, -1, -1, -1
     header_row = table.find("thead")
     if header_row:
@@ -166,29 +205,23 @@ def parse_projects(html):
             elif text == "tasks": tasks_col = i
             elif text == "created": created_col = i
 
-    # Scrape each data row
     for row in table.find_all("tr"):
         if row.find("th"):
             continue
-
         cells = row.find_all("td")
         if not cells:
             continue
-
         name_cell = cells[name_col] if name_col < len(cells) else None
         if not name_cell:
             continue
-
         link = name_cell.find("a")
         name = (link or name_cell).get_text(strip=True)
         if not name:
             continue
-
         pay = cells[pay_col].get_text(strip=True) if pay_col >= 0 and pay_col < len(cells) else ""
         tasks = cells[tasks_col].get_text(strip=True) if tasks_col >= 0 and tasks_col < len(cells) else ""
         created = cells[created_col].get_text(strip=True) if created_col >= 0 and created_col < len(cells) else ""
-
-        projects.append({"name": name, "pay": pay, "tasks": tasks, "created": created})
+        projects.append({"name": name, "id": name, "pay": pay, "tasks": tasks, "created": created})
 
     return projects
 
@@ -199,9 +232,16 @@ def parse_projects(html):
 def filter_projects(projects):
     result = []
     for p in projects:
+        # Empty pay = unpaid training/welcome/refresher. The JSON feed
+        # returns these alongside real projects, so filter them out here
+        # rather than relying on keyword matches to catch every variant.
+        if not p.get("pay"):
+            continue
+
         name_lower = p["name"].lower()
 
-        # Exclude refreshers, reference versions, etc.
+        # Exclude refreshers, reference versions, etc. (belt-and-braces
+        # in case a paid project shows up with one of these tokens).
         if any(kw in name_lower for kw in EXCLUDE_KEYWORDS):
             continue
 
