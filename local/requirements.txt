@@ -1,4 +1,4 @@
 requests>=2.28.0
 beautifulsoup4>=4.14.3
-python-dotenv>=1.0.0
+python-dotenv>=1.2.2
 plyer>=2.1.0
