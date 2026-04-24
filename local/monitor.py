@@ -27,6 +27,7 @@ NTFY_TOPIC = _re.sub(r"[^a-zA-Z0-9_\-]", "", os.getenv("NTFY_TOPIC", ""))
 POLL_INTERVAL = max(300, int(os.getenv("POLL_INTERVAL", "300")))
 DA_SESSION_COOKIE = os.getenv("DA_SESSION_COOKIE", "")
 DESKTOP_NOTIFY = os.getenv("DESKTOP_NOTIFY", "true").lower() == "true"
+PHONE_NOTIFY = os.getenv("PHONE_NOTIFY", "true").lower() == "true"
 KEYWORDS = [k.strip().lower() for k in os.getenv("KEYWORDS", "").split(",") if k.strip()]
 EXCLUDE_KEYWORDS = [k.strip().lower() for k in
                     os.getenv("EXCLUDE_KEYWORDS", "refresher, reference version").split(",")
@@ -83,9 +84,10 @@ def fetch_projects_page(session):
 
         if "login" in resp.url.lower() or "sign_in" in resp.url.lower():
             print("[!] Session expired - redirected to login page.", file=sys.stderr)
-            send_ntfy("DA Alert: Session Expired",
-                      "Your DA session cookie has expired. Please update it.",
-                      tags="warning", priority="urgent")
+            title = "DA Alert: Session Expired"
+            body = "Your DA session cookie has expired. Please update it."
+            send_ntfy(title, body, tags="warning", priority="urgent")
+            send_desktop_notification(title, body)
             return None
 
         if resp.status_code != 200:
@@ -254,6 +256,8 @@ def filter_projects(projects):
 # ─── Notifications ─────────────────────────────────────────────────────────────
 
 def send_ntfy(title, body, tags="money,rocket", priority="high"):
+    if not PHONE_NOTIFY:
+        return
     if not NTFY_TOPIC:
         print("[!] No NTFY_TOPIC set. Skipping push notification.", file=sys.stderr)
         return
@@ -367,6 +371,7 @@ def main():
     print(f"[*] DA Task Alert started")
     print(f"    Poll interval: {POLL_INTERVAL}s")
     print(f"    ntfy topic: {NTFY_TOPIC or '(not set)'}")
+    print(f"    Phone notify: {PHONE_NOTIFY}")
     print(f"    Desktop notify: {DESKTOP_NOTIFY}")
     print(f"    Include keywords: {', '.join(KEYWORDS) if KEYWORDS else '(all)'}")
     print(f"    Exclude keywords: {', '.join(EXCLUDE_KEYWORDS)}")
