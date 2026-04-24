@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         DA Task Alert
 // @namespace    https://github.com/WickedSoda/DA-Task-Alert
-// @version      1.2.0
+// @version      1.3.0
 // @description  Monitor DataAnnotation for new paid projects and send push alerts via ntfy.sh
 // @author       WickedSoda
 // @match        https://app.dataannotation.tech/workers/*
@@ -24,6 +24,7 @@
     keywords: "",
     excludeKeywords: "refresher, reference version",
     desktopNotify: true,
+    phoneNotify: true,
     enabled: true,
   };
 
@@ -311,6 +312,7 @@
     tags = "money,rocket",
     priority = "high",
   ) {
+    if (!getSetting("phoneNotify")) return;
     const topic = sanitizeTopic(getSetting("ntfyTopic"));
     if (!topic) {
       console.warn("[DA Alert] No ntfy topic configured.");
@@ -627,6 +629,10 @@
         <input type="text" id="da-set-exclude" placeholder="refresher, reference version">
 
         <label>
+          <input type="checkbox" id="da-set-phone"> Phone (ntfy) Notifications
+        </label>
+
+        <label>
           <input type="checkbox" id="da-set-desktop"> Desktop Notifications
         </label>
 
@@ -651,6 +657,7 @@
     document.getElementById("da-set-keywords").value = getSetting("keywords");
     document.getElementById("da-set-exclude").value =
       getSetting("excludeKeywords");
+    document.getElementById("da-set-phone").checked = getSetting("phoneNotify");
     document.getElementById("da-set-desktop").checked =
       getSetting("desktopNotify");
     document.getElementById("da-set-enabled").checked = getSetting("enabled");
@@ -734,6 +741,10 @@
       setSetting(
         "excludeKeywords",
         document.getElementById("da-set-exclude").value.trim(),
+      );
+      setSetting(
+        "phoneNotify",
+        document.getElementById("da-set-phone").checked,
       );
       setSetting(
         "desktopNotify",
