@@ -79,7 +79,8 @@ See [server/README.md](server/README.md) for the full deployment guide.
 | `POLL_INTERVAL` | `300` | Seconds between checks (minimum 300 enforced) |
 | `KEYWORDS` | *(empty)* | Only alert for matching projects (empty = all paid projects) |
 | `EXCLUDE_KEYWORDS` | `refresher, reference version` | Silence notifications for these (unpaid training) |
-| `DESKTOP_NOTIFY` | `true` | Show desktop notifications |
+| `PHONE_NOTIFY` | `true` | Send push notifications via ntfy.sh. Set to `false` to silence the phone channel while keeping desktop alerts. |
+| `DESKTOP_NOTIFY` | `true` | Show desktop notifications. Set to `false` on headless servers or to silence desktop while keeping phone alerts. |
 | `DA_SESSION_COOKIE` | *(Python only)* | Session cookie from browser DevTools |
 
 ---
