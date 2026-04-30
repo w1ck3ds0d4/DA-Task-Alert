@@ -17,7 +17,7 @@ ssh ubuntu@<your-vm-ip>
 
 sudo apt update && sudo apt install -y python3 python3-pip git
 
-git clone https://github.com/WickedSoda/DA-Task-Alert.git /opt/da-task-alert
+git clone https://github.com/w1ck3ds0d4/DA-Task-Alert.git /opt/da-task-alert
 cd /opt/da-task-alert/local
 pip3 install -r requirements.txt
 ```
