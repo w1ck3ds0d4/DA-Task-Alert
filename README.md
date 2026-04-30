@@ -99,7 +99,7 @@ See [server/README.md](server/README.md) for the full deployment guide.
 
 - **5-minute minimum poll interval** - DA community standard; polling faster may flag your account
 - **Session cookies expire** - the Python script will alert you via ntfy when your session expires
-- **DOM selectors may break** - if DA updates their frontend, the scraping logic may need updating. The script targets the `<h2>Projects</h2>` heading and the table that follows it.
+- **Data-props JSON, not a table** - DA's current layout embeds the projects list as a JSON blob on a `data-props` attribute of a hybrid root div. The scrapers parse that blob first and only fall back to the legacy `<h2>Projects</h2>` table if the hybrid root is missing. If DA reshapes the JSON or drops the hybrid root, both the userscript and the Python monitor will need an update.
 
 ---
 
