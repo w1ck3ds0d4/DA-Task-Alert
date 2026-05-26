@@ -1,97 +1,93 @@
-# DA Task Alert, Roadmap
+# DA-Task-Alert v1 Roadmap
 
-This document captures planned work, known gaps, and what the project does
-not currently do. It is intentionally conservative: items here are
-candidates, not commitments.
+## What v1 is
 
-## Status Legend
+Monitor DataAnnotation.tech for new paid projects and push alerts via
+ntfy.sh. Three deployment modes for the same logic: a Tampermonkey userscript
+in your browser, a Python CLI on your laptop, or a hardened Python service on
+an Oracle Cloud free-tier VM with systemd.
 
-- `[x]` Complete and shipping.
-- `[~]` In progress on `main`.
-- `[ ]` Not started.
+## Current state
 
-## Phase 1, Core Monitoring (shipping)
+Phase 1 (Tampermonkey userscript) and Phase 2 (Python monitor with session
+cookies, ntfy push, desktop notifications, seen-projects persistence, Oracle
+deployment guide, systemd hardening, `--once` cron mode) are shipped. CI runs
+ruff lint + format (non-blocking) and pip-audit. No tests. Phase 3 (Slack /
+Discord / email channels, project detail scraping, SQLite history, pay-rate
+trends) is planned but not started.
 
-Goal: detect new paid projects and deliver alerts.
+## v1 acceptance criteria
 
-- [x] Tampermonkey userscript with live DOM scraping
-  (`userscript/da-task-alert.user.js`).
-- [x] Python CLI monitor with session cookie auth
-  (`local/monitor.py`).
-- [x] ntfy.sh push notifications, both forms.
-- [x] Desktop notifications (`GM_notification` + `plyer`).
-- [x] Keyword include and exclude filtering.
-- [x] Auto-filter Refreshers and Reference Versions (unpaid training).
-- [x] Persistent seen-projects set, capped at 500 entries.
-- [x] Configurable poll interval with a 5 minute floor.
-- [x] Python session-cookie expiry detection plus urgent ntfy alert.
+- [x] Tampermonkey userscript v1.2.0 with auto-update metadata
+- [x] Python CLI with session cookies, ntfy push, desktop notifications
+- [x] Seen-projects persistence (500-entry cap)
+- [x] 5-minute poll floor + session expiry detection
+- [x] Oracle Cloud deploy guide + systemd hardening
+- [x] `--once` cron mode
+- [x] ruff lint + format CI (non-blocking) + pip-audit
+- [x] SecureCheck workflow wired
+- [ ] At least one alternative alert channel (Slack OR Discord webhook)
+- [ ] Project detail scraping (description, requirements) at alert time
+- [ ] SQLite historical store with simple "appeared on" / "last seen" timestamps
+- [ ] Two integration tests under `tests/` (parser smoke + ntfy stub)
+- [ ] CI gate is hard (ruff blocking) once formatting is stable
+- [ ] Documented manual smoke: laptop run + Oracle deploy + Tampermonkey side by side
+- [ ] Tag `v1.0.0` after the smoke matrix passes
 
-## Phase 2, Deployment (shipping)
+## Milestones to v1
 
-Goal: run headlessly on a server.
+### M1. Add Slack OR Discord webhook channel (S)
 
-- [x] Oracle Cloud free-tier deployment guide
-  (`server/README.md`).
-- [x] Hardened systemd unit (`server/da-task-alert.service`).
-- [x] Environment-variable based config (`shared/config.example.env`).
-- [x] `--once` mode for cron scheduling.
+- [ ] Pick one (Discord is simpler) and add `--notify-discord <url>` (or env var)
+- [ ] Fan-out: project alert produces ntfy + chosen webhook simultaneously
+- [ ] Document in README
 
-## Phase 3, Improvements (planned)
+**Acceptance:** running the monitor with both flags posts to ntfy AND the chosen channel.
 
-Goal: more notification channels and operational reliability.
+### M2. Project detail scraping (S/M)
 
-- [ ] Slack webhook integration.
-- [ ] Discord webhook integration.
-- [ ] Email notifications (SMTP).
-- [ ] Project detail scraping (description, requirements). Currently
-  only the name, pay, task count, and created timestamp are captured.
-- [ ] Historical project database (SQLite). Today, state is just a
-  flat seen-set in `local/seen_projects.json`.
-- [ ] Pay-rate trend tracking over time.
-- [ ] Proxy / VPN support for the Python monitor.
-- [ ] Auto cookie refresh via headless browser login. Today, expired
-  cookies require manual replacement and a service restart.
+- [ ] Fetch the project detail page when a new project appears
+- [ ] Extract description + requirements + pay rate when visible
+- [ ] Include those fields in the notification body
 
-## Phase 4, Dashboard (speculative)
+**Acceptance:** an ntfy push surfaces enough info to decide whether to open it without visiting DA.
 
-Goal: web UI for monitoring and history.
+### M3. SQLite history (S)
 
-- [ ] Simple web dashboard (Flask or FastAPI).
-- [ ] Project history timeline.
-- [ ] Earnings estimate tracker.
-- [ ] Filter presets (save named keyword sets).
-- [ ] Multi-account support.
+- [ ] Replace the 500-entry JSON seen-set with SQLite (`history.db`)
+- [ ] Track `first_seen`, `last_seen`, optional `pay_rate`, `gone_at`
+- [ ] One-shot migration from existing JSON
+- [ ] `--stats` flag prints a 30-day summary (count seen, average pay)
 
-## Known Gaps
+**Acceptance:** running `--stats` produces a meaningful trend table from at least a week of data.
 
-- No automated tests. Both the userscript and the Python monitor are
-  validated by hand against the live DA dashboard.
-- No CI pipeline. Releases are manual edits to the userscript version
-  header and a fresh Python pull on the server.
-- No structured logging. Both forms write plaintext to stdout / browser
-  console.
-- The legacy `<table>` fallback in `local/monitor.py` and the userscript
-  exists for forward compatibility but is no longer exercised by DA's
-  current dashboard. It has not been re-tested recently.
-- Server deployment guide assumes Ubuntu and Oracle Cloud's Always Free
-  shape. No instructions exist for other providers, but nothing in the
-  service file is Oracle-specific.
-- ntfy is the only push backend. There is no abstraction layer for
-  other push providers (yet, see Phase 3).
+### M4. Tests (S)
 
-## Out of Scope
+- [ ] Add `tests/` with pytest
+- [ ] Parser test: feed a saved HTML snapshot, assert expected projects parsed
+- [ ] ntfy + Discord stub test (mock HTTP)
+- [ ] Wire `pytest` into `ci.yml` (blocking)
 
-The following are intentionally not pursued:
+**Acceptance:** at least 5 tests; CI runs them; main gates on them.
 
-- Hosted / SaaS deployment of the monitor. Users self-host.
-- Bypassing DA's authentication. The tool always uses the user's own
-  session cookie or live browser session.
-- Automated task acceptance or click-through. The tool only notifies.
-- Polling faster than 5 minutes. The floor is enforced in code as a
-  safety measure against account flagging.
+### M5. Tag + smoke (S)
 
-## Release Process
+- [ ] Bump userscript to v1.3.0
+- [ ] CHANGELOG entry
+- [ ] Manual smoke across all three deployment modes
+- [ ] Tag `v1.0.0`
 
-Releases are tag-driven and manual. There is no automation for bumping
-the userscript `@version` header or pushing a new `.user.js` to the
-auto-update URL. When the format ever changes, this section will grow.
+**Acceptance:** documented per-mode smoke pass; tag pushed.
+
+## Beyond v1 (post-1.0 polish)
+
+- Email (SMTP) channel
+- Multiple ntfy topics / multi-user
+- Pay-rate trend chart (small static page)
+- Resilience against DA UI changes (e.g., two parser strategies, fail-fast on both)
+
+## Out of scope for v1
+
+- Hosted SaaS edition
+- DA OAuth / paid API (DA doesn't offer one)
+- Mobile-only deployment (Tampermonkey via Android Firefox works but isn't a target)
